@@ -1,0 +1,12 @@
+run.bat
+
+__pycache__/
+venv/
+
+replays/
+DH SC2 Masters - Atlanta 2022/
+TSL 9 Replay Pack/
+
+
+*.ipynb
+*.csv
