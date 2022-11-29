@@ -1,21 +1,21 @@
 import os
 import datetime
+import json
 
 import mpyq
 from s2protocol import versions
 
 from enum import Enum
 
-class League(Enum):
-  UNRANKED = 8
-  GM = 7
-  MASTER = 6
-  DIAMOND = 5
-  PLATINUM = 4
-  GOLD = 3
-  SILVER = 2
-  BRONZE = 1
-  VSAI = 0
+UNRANKED = 8
+GM = 7
+MASTER = 6
+DIAMOND = 5
+PLATINUM = 4
+GOLD = 3
+SILVER = 2
+BRONZE = 1
+VSAI = 0
 
 def walk_replays(dir, recursive = True):
   for path,dirs,files in os.walk(dir):
@@ -31,7 +31,7 @@ def list_files(path, recursive = True):
 def game_loops_to_time_delta(game_loops):
   return datetime.timedelta(seconds=game_loops/22.4)
 
-def open_replay(path, account_name = "Owen"):
+def open_replay(path):
   archive = mpyq.MPQArchive(path)
   header_contents = archive.header['user_data_header']['content']
   header = versions.latest().decode_replay_header(header_contents)
@@ -82,7 +82,7 @@ def open_replay(path, account_name = "Owen"):
     p["won"] = i["m_result"] == 1
     p["race"] = i["m_race"].decode("utf-8")
     p["mmr"] = replay["init_data"]['m_syncLobbyState']['m_userInitialData'][player_index]['m_scaledRating']
-    p["league"] = League(replay["init_data"]['m_syncLobbyState']['m_userInitialData'][player_index]['m_highestLeague'])
+    p["league"] = replay["init_data"]['m_syncLobbyState']['m_userInitialData'][player_index]['m_highestLeague']
 
     p["build"] = []
 
@@ -116,19 +116,113 @@ def open_replay(path, account_name = "Owen"):
     player_index += 1
     replay["players"].append(p)
 
-  # if len(replay["players"]) == 2:
-  #   if replay["players"][0]["name"] == account_name:
-  #     replay["me"] = replay["players"][0]
-  #     replay["opp"] = replay["players"][1]
-
-  #   if replay["players"][1]["name"] == account_name:
-  #     replay["me"] = replay["players"][1]
-  #     replay["opp"] = replay["players"][0]
-
-  #   me = replay.get("me")
-  #   opp = replay.get("opp")
-  #   if me != None and opp != None:
-  #     replay["matchup"] = f"{me['race'][0]}v{opp['race'][0]}"
-
   return replay
 
+
+def serialize_replays_to_json(replays):
+  """
+  Warning! Avoids copies so it alters the data directly.
+  Afterwards the data needs to get deserialized to convert string dates to objects etc.
+  """
+  for i in replays:
+    if i.get("init_data"): del i["init_data"]
+    if i.get("details"): del i["details"]
+    if i.get("game_events"): del i["game_events"]
+    if i.get("message_events"): del i["message_events"]
+    if i.get("tracker_events"): del i["tracker_events"]
+    if i.get("archive"): del i["archive"]
+    if i.get("header"): del i["header"]
+    if i.get("header_content"): del i["header_content"]
+    if type(i["date"]) != str: 
+      i["date"] = i["date"].strftime("%Y-%m-%d %H:%M:%S")
+    if type(i["duration"]) != str:
+      i["duration"] = str(i["duration"])
+      if i["duration"].find(".") == -1: 
+        i["duration"] += ".000000"
+
+    for p in i.get("players"):
+      if p.get("build"): del p["build"]
+  result = json.dumps(replays)
+  return result
+
+def deserialize_replays(replays):
+  if type(replays) == str:
+    replays = json.loads(replays)
+  for i in replays:
+    i["date"] = datetime.datetime.strptime(i["date"], "%Y-%m-%d %H:%M:%S")
+    t = datetime.datetime.strptime(i["duration"], "%H:%M:%S.%f")
+    i["duration"] = datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second, microseconds=t.microsecond)
+  return replays
+
+def is_replay_1v1_ladder(replay):
+  if len(replay["players"]) != 2: return False
+  if replay["players"][0]["league"] == VSAI: return False
+  if replay["players"][1]["league"] == VSAI: return False
+  return True
+
+def get_players(replay, account_name):
+  if not is_replay_1v1_ladder(replay): return None, None
+  if replay["players"][0]["name"] in account_name: return replay["players"][0], replay["players"][1]
+  if replay["players"][1]["name"] in account_name: return replay["players"][1], replay["players"][0]
+  return None, None
+
+def replay_included(replays, path):
+  for r in replays:
+    if r["path"] == path: 
+      return True
+  return False
+
+def try_adding_replay(replays, path):
+  if not replay_included(replays, path):
+    parsed_replay = open_replay(path)
+    replays.append(parsed_replay)
+
+def try_adding_replays(replays, path):
+  for i in list_files(path):
+    try_adding_replay(replays, i)
+  
+def read_file(path):
+  fd = open(path, "r")
+  result = fd.read()  
+  fd.close()
+  return result
+
+def write_file(path, content):
+  fd = open(path, "w")
+  fd.write(content)
+  fd.close()
+
+def save_replay_cache(replays, file_path):
+  cache = serialize_replays_to_json(replays)
+  write_file(file_path, cache)
+  deserialize_replays(replays)
+
+def sort_replays_by_date(replays): 
+  replays.sort(key = lambda x: x["date"])
+
+def filter_replays(replays, player, race):
+  filtered_replays = []
+  for r in replays:
+    if is_replay_1v1_ladder(r):
+      me, opp = get_players(r, player)
+      if me and me["race"] == race:
+        filtered_replays.append(r)
+  return filtered_replays
+
+def load_replay_folder(path, cache_file = None):
+  replays = []
+  if cache_file:
+    try: 
+      content = read_file(cache_file)
+      replays = deserialize_replays(content)
+    except FileNotFoundError: 
+      replays = []
+  
+  try_adding_replays(replays, path)
+  sort_replays_by_date(replays)
+  return replays
+
+
+def get_matchup(replay, account):
+  me, opp = get_players(replay, account)
+  return f"""{me["race"][0]}v{opp["race"][0]}"""
