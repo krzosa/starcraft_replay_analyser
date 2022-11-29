@@ -7,13 +7,22 @@ from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg)
 
 import replay_data_extraction as rde
 
-content_frame = None
-window = None
-recent_replay = None
+ACCOUNT_NAME = "Owen"
+CACHE_FILE = "replays.json"
+REPLAY_FOLDER = "replays"
+
+global_last_loaded_replays = None
+
+def try_updating_cache_file(replays):
+  global global_last_loaded_replays
+  if global_last_loaded_replays != None and len(replays) > len(global_last_loaded_replays):
+    rde.save_replay_cache(replays, CACHE_FILE)
+  global_last_loaded_replays = replays
 
 def create_history_plots(window):
   frame = tk.Frame(window)
-  replays = rde.load_replay_folder("replays", cache_file="replays.json")
+  replays = rde.load_replay_folder(REPLAY_FOLDER, cache_file=CACHE_FILE)
+  try_updating_cache_file(replays)
 
   def add_time_played_per_day():
     times = {}
@@ -45,24 +54,24 @@ def create_history_plots(window):
     
   def add_protoss_mmr():
     #copy_pasta
-    filtered_replays_protoss = rde.filter_replays(replays, player="Owen", race="Protoss")
+    filtered_replays_protoss = rde.filter_replays(replays, player=ACCOUNT_NAME, race="Protoss")
     mmr_protoss = []
     for r in filtered_replays_protoss:  
-      me, opp = rde.get_players(r, "Owen")
+      me, opp = rde.get_players(r, ACCOUNT_NAME)
       mmr_protoss.append(me["mmr"])
 
     #copy_pasta
-    filtered_replays_zerg = rde.filter_replays(replays, player="Owen", race="Zerg")
+    filtered_replays_zerg = rde.filter_replays(replays, player=ACCOUNT_NAME, race="Zerg")
     mmr_zerg = []
     for r in filtered_replays_zerg:  
-      me, opp = rde.get_players(r, "Owen")
+      me, opp = rde.get_players(r, ACCOUNT_NAME)
       mmr_zerg.append(me["mmr"])
 
     #copy_pasta
-    filtered_replays_terran = rde.filter_replays(replays, player="Owen", race="Terran")
+    filtered_replays_terran = rde.filter_replays(replays, player=ACCOUNT_NAME, race="Terran")
     mmr_terran = []
     for r in filtered_replays_terran:  
-      me, opp = rde.get_players(r, "Owen")
+      me, opp = rde.get_players(r, ACCOUNT_NAME)
       mmr_zerg.append(me["mmr"])
 
     fig = Figure(figsize = (8, 4), dpi = 100)
@@ -78,27 +87,30 @@ def create_history_plots(window):
     canvas.get_tk_widget().pack()
   add_protoss_mmr()
 
+  
+
   return frame
 
 def create_replay_plots(window):
   frame = tk.Frame(window)
-  replays = rde.load_replay_folder("replays", cache_file="replays.json")
-  replay = replays[-1]
+  replays = rde.load_replay_folder(REPLAY_FOLDER, cache_file=CACHE_FILE)
+  try_updating_cache_file(replays)
   
   # Search for last 1v1 replay
+  replay = replays[-1]
   i = 0
   while i < (len(replays) - 1):
     index = -1 - i
     replay = replays[index]
-    me, opp = rde.get_players(replay, "Owen") 
+    me, opp = rde.get_players(replay, ACCOUNT_NAME) 
     if me != None: break
 
-  me, opp = rde.get_players(replay, "Owen")
+  me, opp = rde.get_players(replay, ACCOUNT_NAME)
 
   me_mmr_str = str(me["mmr"])
   opp_mmr_str = str(opp["mmr"])
   won = "won" if me["won"] == 1 else "lost"
-  replay_info = tk.Label(frame, text=f"""{won} {me["name"]} {me_mmr_str} VS {opp["name"]} {opp_mmr_str} ({rde.get_matchup(replay, "Owen")})""")
+  replay_info = tk.Label(frame, text=f"""{won} {me["name"]} {me_mmr_str} VS {opp["name"]} {opp_mmr_str} ({rde.get_matchup(replay, ACCOUNT_NAME)})""")
   replay_info.pack()
 
   def add_resource_plot():
@@ -156,30 +168,31 @@ def create_replay_plots(window):
 
   return frame
 
+content_frame = None
+window = None
+
 def on_button_recent_match():
   global content_frame
-  global recent_replay
   global window
   content_frame.destroy()
   content_frame = create_replay_plots(window)
   content_frame.pack()
 
+def on_key_recent_match(e):
+  on_button_recent_match()  
+
 def on_button_history():
   global content_frame
-  global recent_replay
   global window
   content_frame.destroy()
   content_frame = create_history_plots(window)
   content_frame.pack()
 
-
 def on_key_history(e):
   on_button_history()  
 
-def on_key_recent_match(e):
-  on_button_recent_match()  
-
 def add_button_frame():
+  global window
   button_frame = tk.Frame(window)
   button_frame.pack(fill="both")
 
@@ -193,11 +206,6 @@ def add_button_frame():
 
 window = tk.Tk()
 add_button_frame()
-content_frame = create_replay_plots(window)
+content_frame = create_history_plots(window)
 content_frame.pack()
 window.mainloop()
-
-
-
-  
-# content_frame.pack_forget()

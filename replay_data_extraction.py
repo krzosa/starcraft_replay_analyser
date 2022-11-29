@@ -1,6 +1,7 @@
 import os
 import datetime
 import json
+import math
 
 import mpyq
 from s2protocol import versions
@@ -49,10 +50,10 @@ def open_replay(path):
   replay["details"] = protocol.decode_replay_details(coded_details)
 
   coded_game_events = archive.read_file('replay.game.events')
-  replay["game_events"] = protocol.decode_replay_game_events(coded_game_events)
+  replay["game_events"] = list(protocol.decode_replay_game_events(coded_game_events))
 
   coded_message_events = archive.read_file('replay.message.events')
-  replay["message_events"] = protocol.decode_replay_message_events(coded_message_events)
+  replay["message_events"] = list(protocol.decode_replay_message_events(coded_message_events))
 
   coded_tracker_events = archive.read_file('replay.tracker.events')
   replay["tracker_events"] = list(protocol.decode_replay_tracker_events(coded_tracker_events))
@@ -94,6 +95,23 @@ def open_replay(path):
     p["army_value_minerals"] = []
     p["army_value_gas"] = []
 
+    minutes = replay["duration"].total_seconds() / 60
+    actions = 1.4
+    for ev in replay["game_events"]:
+      id = ev["_userid"]["m_userId"]
+      if id == player_index: continue
+
+      match ev["_event"]:
+        case "NNet.Game.SControlGroupUpdateEvent" |\
+             "NNet.Game.SCameraSaveEvent" |\
+             "NNet.Game.SCmdUpdateTargetPointEvent" |\
+             "NNet.Game.SCmdUpdateTargetUnitEvent" |\
+             "NNet.Game.SCmdEvent" |\
+             "NNet.Game.SSelectionDeltaEvent":
+          actions += 1.4
+
+    p["apm_avg"] = actions / minutes
+
     for i in replay["tracker_events"]:
       time = game_loops_to_time_delta(i["_gameloop"])
       if i.get("m_controlPlayerId") != control_id and i.get("m_playerId") != control_id:
@@ -112,6 +130,8 @@ def open_replay(path):
           p["army_value_minerals"].append(i["m_stats"]["m_scoreValueMineralsUsedCurrentArmy"])
           p["army_value_gas"].append(i["m_stats"]["m_scoreValueVespeneUsedCurrentArmy"])
 
+    p["index"] = player_index
+    p["control_id"] = control_id
     control_id += 1 #BE_CAREFUL: Seems to work but not sure if it's correct
     player_index += 1
     replay["players"].append(p)
@@ -220,6 +240,7 @@ def load_replay_folder(path, cache_file = None):
   
   try_adding_replays(replays, path)
   sort_replays_by_date(replays)
+  # save_replay_cache(replays, cache_file)
   return replays
 
 
